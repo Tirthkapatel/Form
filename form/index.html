@@ -1,0 +1,624 @@
+<!DOCTYPE html>
+<html lang="gu">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>પોષક સભ્ય માહિતી ફોર્મ — સત્સંગ પોષક મેનેજમેન્ટ</title>
+
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Hind+Vadodara:wght@300;400;500;600;700&display=swap');
+    body { font-family: 'Hind Vadodara', sans-serif; background-color: #fff7ed; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect } = React;
+    const API_URL = 'https://murtibaug.in/posakapp/api.php';
+
+    async function apiCall(action, data = {}, method = 'POST') {
+      let url = `${API_URL}?action=${action}`;
+      const opts = { method };
+      if (method === 'GET') {
+        const qs = new URLSearchParams(data).toString();
+        if (qs) url += '&' + qs;
+      } else {
+        opts.headers = { 'Content-Type': 'application/json' };
+        opts.body = JSON.stringify(data);
+      }
+      const res = await fetch(url, opts);
+      const json = await res.json().catch(() => ({ success: false, error: 'સર્વર તરફથી અયોગ્ય જવાબ.' }));
+      if (!res.ok || json.success === false) throw new Error(json.error || 'કંઈક ભૂલ થઈ, ફરી પ્રયત્ન કરો.');
+      return json;
+    }
+
+    async function uploadPhoto(file) {
+      const form = new FormData();
+      form.append('photo', file);
+      const res = await fetch(`${API_URL}?action=public_upload_photo`, { method: 'POST', body: form });
+      const json = await res.json().catch(() => ({ success: false, error: 'અપલોડ નિષ્ફળ.' }));
+      if (!res.ok || json.success === false) throw new Error(json.error || 'ફોટો અપલોડ નિષ્ફળ.');
+      return json.photoUrl;
+    }
+
+    const emptyForm = {
+      mobile: '', fullName: '', smkNo: '', birthDate: '', bloodGroup: '',
+      education: '', occupation: '', occupationType: '', nativeVillage: '', taluka: '', district: '', address: '',
+      houseType: '', mediclaim: '',
+      skillField: '', skillFieldOther: '', hobbies: '',
+      satsangYears: '', satsangDay: '', kathaListening: '', mangalaAarti: '', cheshta: '', sabhaYears: '',
+      sleepTime: '', sleepTimeOther: '', kundalShibir: '', sevaInterest: '',
+      murtibaugSeva: '', directSevaSant: '',
+      friend1Name: '', friend1Mobile: '', friend2Name: '', friend2Mobile: '',
+      knownSaint1: '', knownSaint2: '', localElderDevotees: '', localElderDevotee2: '',
+      suggestedLeaderId: '', photoUrl: '',
+    };
+    const HINT = "જો હોય તો લખો, નહીતર \"ના\" લખો";
+    const SKILL_OPTIONS = [
+      'એન્જિનિયરિંગ / ટેકનિકલ', 'મેડિકલ / હેલ્થકેર', 'કમ્પ્યૂટર / IT / કોડિંગ',
+      'AI / Prompting / Image Video Generation', 'ગ્રાફિક ડિઝાઇન / વિડિઓ એડિટિંગ',
+      'એકાઉન્ટિંગ / ફાઇનાન્સ / ટૅલી', 'કાનૂની / લૉ', 'શિક્ષણ / ટ્યૂટોરિંગ', 'ખેતી / કૃષિ',
+      'બિઝનેસ / માર્કેટિંગ', 'ભાષા / લેખન', 'સંગીત / વાદ્યયંત્ર', 'કળા / ચિત્ર / પેઇન્ટિંગ',
+      'ફોટોગ્રાફી / વિડિઓગ્રાફી', 'સોશ્યલ મીડિયા / કન્ટેન્ટ ક્રિએશન', 'ઇલેક્ટ્રિકલ / કારપેન્ટ્રી / પ્લમ્બિંગ',
+    ];
+    const SLEEP_OPTIONS = ['10:00 વાગ્યે', '10:30 વાગ્યે', '11:00 વાગ્યે', '11:30 વાગ્યે', '12:00 વાગ્યે', '12:00 વાગ્યા પછી'];
+
+    function App() {
+      const [stage, setStage] = useState('loading'); // loading | closed | mobile | form | done
+      const [mobileInput, setMobileInput] = useState('');
+      const [mobileError, setMobileError] = useState('');
+      const [isChecking, setIsChecking] = useState(false);
+      const [leaders, setLeaders] = useState([]);
+      const [wasFound, setWasFound] = useState(false);
+      const [formData, setFormData] = useState(emptyForm);
+      const [sons, setSons] = useState([]);
+
+      const addSon = () => setSons(prev => [...prev, { name: '', birthDate: '', satsangDate: '' }]);
+      const removeSon = (idx) => setSons(prev => prev.filter((_, i) => i !== idx));
+      const updateSon = (idx, key, val) => setSons(prev => prev.map((s, i) => i === idx ? { ...s, [key]: val } : s));
+      const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
+      const [isSaving, setIsSaving] = useState(false);
+      const [saveError, setSaveError] = useState('');
+      const [friend1Found, setFriend1Found] = useState(false);
+      const [friend2Found, setFriend2Found] = useState(false);
+
+      useEffect(() => {
+        (async () => {
+          try {
+            const result = await apiCall('public_form_status', {}, 'GET');
+            setStage(result.open ? 'mobile' : 'closed');
+          } catch (err) {
+            setStage('closed');
+          }
+        })();
+      }, []);
+
+      const handleCheckMobile = async (e) => {
+        e.preventDefault();
+        setMobileError('');
+        const clean = mobileInput.trim();
+        if (!/^[0-9]{10}$/.test(clean)) {
+          setMobileError('કૃપા કરીને યોગ્ય ૧૦ અંકનો મોબાઈલ નંબર નાખો.');
+          return;
+        }
+        setIsChecking(true);
+        try {
+          const result = await apiCall('public_check_mobile', { mobile: clean }, 'GET');
+          setLeaders(result.leaders || []);
+          if (result.found) {
+            setWasFound(true);
+            setFormData({
+              ...emptyForm, ...result.member, mobile: clean,
+              suggestedLeaderId: result.member.assignedLeaderId || '',
+              nativeVillage: result.member.nativeVillage || '', taluka: result.member.taluka || '', district: result.member.district || '',
+            });
+            setSons(Array.isArray(result.member.sons) && result.member.sons.length > 0 ? result.member.sons : []);
+          } else {
+            setWasFound(false);
+            setFormData({ ...emptyForm, mobile: clean });
+            setSons([]);
+          }
+          setStage('form');
+        } catch (err) {
+          setMobileError(err.message);
+        } finally {
+          setIsChecking(false);
+        }
+      };
+
+      const handleFriend1MobileChange = async (val) => {
+        setFormData(prev => ({ ...prev, friend1Mobile: val }));
+        setFriend1Found(false);
+        if (val.trim().length !== 10) return;
+        try {
+          const result = await apiCall('public_find_by_mobile', { mobile: val.trim() }, 'GET');
+          if (result.found) {
+            setFormData(prev => ({ ...prev, friend1Mobile: val, friend1Name: result.name }));
+            setFriend1Found(true);
+          }
+        } catch (err) { /* silent */ }
+      };
+
+      const handleFriend2MobileChange = async (val) => {
+        setFormData(prev => ({ ...prev, friend2Mobile: val }));
+        setFriend2Found(false);
+        if (val.trim().length !== 10) return;
+        try {
+          const result = await apiCall('public_find_by_mobile', { mobile: val.trim() }, 'GET');
+          if (result.found) {
+            setFormData(prev => ({ ...prev, friend2Mobile: val, friend2Name: result.name }));
+            setFriend2Found(true);
+          }
+        } catch (err) { /* silent */ }
+      };
+
+      const handlePhotoChange = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        if (file.size > 3 * 1024 * 1024) {
+          alert('કૃપા કરીને ૩ MB થી નાની સાઈઝનો ફોટો પસંદ કરો.');
+          return;
+        }
+        setIsUploadingPhoto(true);
+        try {
+          const photoUrl = await uploadPhoto(file);
+          setFormData(prev => ({ ...prev, photoUrl }));
+        } catch (err) {
+          alert('❌ ' + err.message);
+        } finally {
+          setIsUploadingPhoto(false);
+        }
+      };
+
+      const handleSubmit = async (e) => {
+        e.preventDefault();
+        setSaveError('');
+
+        if (!formData.fullName.trim()) return setSaveError('નામ જરૂરી છે.');
+        if (!formData.birthDate) return setSaveError('જન્મ તારીખ જરૂરી છે.');
+        if (!formData.friend1Name.trim() || !formData.friend1Mobile.trim()) return setSaveError('મિત્ર ૧ નું નામ અને મોબાઈલ જરૂરી છે.');
+        if (!formData.friend2Name.trim() || !formData.friend2Mobile.trim()) return setSaveError('મિત્ર ૨ નું નામ અને મોબાઈલ જરૂરી છે.');
+        if (!formData.photoUrl) return setSaveError('સેલ્ફી ફોટો જરૂરી છે.');
+        if (!formData.kathaListening) return setSaveError('કૃપા કરીને કથા સાંભળવા વિશે જવાબ આપો.');
+        if (!formData.mangalaAarti) return setSaveError('કૃપા કરીને મંગળા આરતી વિશે જવાબ આપો.');
+        if (!formData.cheshta) return setSaveError('કૃપા કરીને ચેષ્ટા વિશે જવાબ આપો.');
+        if (!formData.sleepTime) return setSaveError('કૃપા કરીને સૂવાનો સમય પસંદ કરો.');
+
+        setIsSaving(true);
+        try {
+          await apiCall('public_submit_member', { ...formData, sons });
+          setStage('done');
+        } catch (err) {
+          setSaveError(err.message);
+        } finally {
+          setIsSaving(false);
+        }
+      };
+
+      const field = (label, key, opts = {}) => (
+        <div className={opts.half ? '' : 'col-span-2'}>
+          <label className="text-xs font-semibold text-gray-700 block mb-1">
+            {label} {opts.required && <span className="text-rose-600">*</span>}
+          </label>
+          {opts.type === 'select' ? (
+            <select
+              value={formData[key]}
+              onChange={(e) => setFormData({ ...formData, [key]: e.target.value })}
+              className="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none"
+            >
+              {opts.options}
+            </select>
+          ) : (
+            <input
+              type={opts.type || 'text'}
+              value={formData[key]}
+              placeholder={opts.placeholder || ''}
+              onChange={(e) => setFormData({ ...formData, [key]: e.target.value })}
+              className="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none placeholder:text-gray-400 placeholder:text-xs"
+            />
+          )}
+        </div>
+      );
+
+      // ---------------- Loading ----------------
+      if (stage === 'loading') {
+        return (
+          <div className="min-h-screen flex items-center justify-center">
+            <i className="fa-solid fa-spinner fa-spin text-3xl text-orange-600"></i>
+          </div>
+        );
+      }
+
+      // ---------------- Closed ----------------
+      if (stage === 'closed') {
+        return (
+          <div className="min-h-screen flex items-center justify-center p-4">
+            <div className="bg-white rounded-2xl shadow-lg p-8 max-w-sm w-full text-center space-y-3">
+              <i className="fa-solid fa-circle-info text-4xl text-orange-500"></i>
+              <h1 className="text-lg font-bold text-gray-900">આ ફોર્મ હાલ બંધ છે</h1>
+              <p className="text-sm text-gray-500">કૃપા કરીને પોષક લીડર અથવા Admin નો સંપર્ક કરો.</p>
+            </div>
+          </div>
+        );
+      }
+
+      // ---------------- Done ----------------
+      if (stage === 'done') {
+        return (
+          <div className="min-h-screen flex items-center justify-center p-4">
+            <div className="bg-white rounded-2xl shadow-lg p-8 max-w-sm w-full text-center space-y-3">
+              <i className="fa-solid fa-circle-check text-5xl text-emerald-500"></i>
+              <h1 className="text-xl font-bold text-gray-900">આભાર! 🙏</h1>
+              <p className="text-sm text-gray-600">તમારી વિગતો સફળતાપૂર્વક સેવ થઈ ગઈ છે.</p>
+              <p className="text-xs text-gray-400">જય સ્વામિનારાયણ</p>
+            </div>
+          </div>
+        );
+      }
+
+      // ---------------- Mobile entry ----------------
+      if (stage === 'mobile') {
+        return (
+          <div className="min-h-screen flex items-center justify-center p-4">
+            <div className="bg-white rounded-2xl shadow-lg p-6 max-w-sm w-full space-y-4">
+              <div className="text-center space-y-1">
+                <i className="fa-solid fa-users text-3xl text-orange-600"></i>
+                <h1 className="text-lg font-bold text-gray-900">પોષક સભ્ય માહિતી ફોર્મ</h1>
+                <p className="text-xs text-gray-500">શરૂ કરવા તમારો મોબાઈલ નંબર નાખો</p>
+              </div>
+              <form onSubmit={handleCheckMobile} className="space-y-3">
+                <input
+                  type="tel" maxLength="10" placeholder="મોબાઈલ નંબર"
+                  value={mobileInput}
+                  onChange={(e) => setMobileInput(e.target.value.replace(/\D/g, ''))}
+                  className="w-full border border-gray-300 rounded-lg p-3 text-center text-lg font-bold tracking-wider focus:ring-2 focus:ring-orange-500 focus:outline-none"
+                />
+                {mobileError && <p className="text-rose-600 text-xs font-semibold text-center">{mobileError}</p>}
+                <button
+                  type="submit" disabled={isChecking}
+                  className="w-full bg-orange-600 hover:bg-orange-700 disabled:opacity-60 text-white font-bold py-3 rounded-lg text-sm shadow"
+                >
+                  {isChecking ? 'ચકાસાય છે...' : 'આગળ વધો'}
+                </button>
+              </form>
+            </div>
+          </div>
+        );
+      }
+
+      // ---------------- Full form ----------------
+      return (
+        <div className="min-h-screen p-4 pb-10">
+          <div className="max-w-lg mx-auto bg-white rounded-2xl shadow-lg p-5 space-y-5">
+            <div className="text-center space-y-1 border-b pb-4">
+              <i className="fa-solid fa-id-card text-3xl text-orange-600"></i>
+              <h1 className="text-lg font-bold text-gray-900">સભ્યની વિગતો</h1>
+              <p className="text-xs text-gray-500">
+                {wasFound ? '✓ તમારી હાલની વિગતો ભરેલી છે — જરૂર હોય ત્યાં સુધારો' : 'નવી નોંધણી — બધી વિગતો ભરો'}
+              </p>
+              <p className="text-sm font-bold text-orange-700">📱 {formData.mobile}</p>
+            </div>
+
+            {}
+
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div className="grid grid-cols-2 gap-3">
+                {field('પૂરું નામ', 'fullName', { required: true, half: true })}
+                {field('SMK નંબર', 'smkNo', { half: true })}
+                {field('જન્મ તારીખ', 'birthDate', { type: 'date', required: true, half: true })}
+                {field('બ્લડ ગ્રુપ', 'bloodGroup', {
+                  half: true, type: 'select',
+                  options: (
+                    <>
+                      <option value="">-- પસંદ કરો --</option>
+                      <option value="A+">A+</option>
+                      <option value="A-">A-</option>
+                      <option value="B+">B+</option>
+                      <option value="B-">B-</option>
+                      <option value="AB+">AB+</option>
+                      <option value="AB-">AB-</option>
+                      <option value="O+">O+</option>
+                      <option value="O-">O-</option>
+                      <option value="ના">ના (ખબર નથી)</option>
+                    </>
+                  ),
+                })}
+              </div>
+
+              {field('હાલનું સરનામું', 'address', { placeholder: HINT })}
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-semibold text-gray-700 block mb-1">તમે રહો છો તે મકાન — ઘરનું છે કે ભાડે?</label>
+                  <select value={formData.houseType} onChange={(e) => setFormData({ ...formData, houseType: e.target.value })} className="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none">
+                    <option value="">-- પસંદ કરો --</option>
+                    <option value="ઘરનું">ઘરનું</option>
+                    <option value="ભાડે">ભાડે</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-gray-700 block mb-1">Mediclaim છે?</label>
+                  <select value={formData.mediclaim} onChange={(e) => setFormData({ ...formData, mediclaim: e.target.value })} className="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none">
+                    <option value="">-- પસંદ કરો --</option>
+                    <option value="હા">હા</option>
+                    <option value="ના">ના</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-2">
+                {field('મૂળ ગામ', 'nativeVillage', { half: true, placeholder: HINT })}
+                {field('તાલુકો', 'taluka', { half: true, placeholder: HINT })}
+                {field('જિલ્લો', 'district', { half: true, placeholder: HINT })}
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                {field('અભ્યાસ', 'education', { half: true, placeholder: HINT })}
+                <div>
+                  <label className="text-xs font-semibold text-gray-700 block mb-1">પોતાનો વ્યવસાય / ધંધો</label>
+                  <select
+                    value={formData.occupationType}
+                    onChange={(e) => setFormData({ ...formData, occupationType: e.target.value })}
+                    className="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none mb-2"
+                  >
+                    <option value="">-- પસંદ કરો --</option>
+                    <option value="નોકરી">નોકરી</option>
+                    <option value="ધંધો">ધંધો</option>
+                    <option value="અભ્યાસ ચાલુ છે">અભ્યાસ ચાલુ છે</option>
+                  </select>
+                  <input
+                    type="text" placeholder="વિગત લખો (દા.ત. કંપનીનું નામ / ધંધાનો પ્રકાર)"
+                    value={formData.occupation}
+                    onChange={(e) => setFormData({ ...formData, occupation: e.target.value })}
+                    className="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none placeholder:text-gray-400 placeholder:text-xs"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold text-gray-700 block mb-1">તમને કયા ક્ષેત્રની આવડત છે?</label>
+                <select
+                  value={formData.skillField}
+                  onChange={(e) => setFormData({ ...formData, skillField: e.target.value })}
+                  className="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none"
+                >
+                  <option value="">-- પસંદ કરો --</option>
+                  {SKILL_OPTIONS.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                  <option value="Other">Other</option>
+                </select>
+                {formData.skillField === 'Other' && (
+                  <input
+                    type="text" placeholder="લખો..."
+                    value={formData.skillFieldOther}
+                    onChange={(e) => setFormData({ ...formData, skillFieldOther: e.target.value })}
+                    className="w-full border border-gray-300 rounded-lg p-2.5 text-sm mt-2 focus:ring-2 focus:ring-orange-500 focus:outline-none"
+                  />
+                )}
+              </div>
+
+              {field('તમારા શોખ (Hobbies) — ટૂંકમાં લખો', 'hobbies', { placeholder: HINT })}
+
+              <div>
+                <label className="text-xs font-semibold text-gray-700 block mb-1">તમને કેટલા વર્ષથી સત્સંગ છે?</label>
+                <select value={formData.satsangYears} onChange={(e) => setFormData({ ...formData, satsangYears: e.target.value })} className="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none">
+                  <option value="">-- પસંદ કરો --</option>
+                  <option value="૧ વર્ષ કરતા ઓછો">૧ વર્ષ કરતા ઓછો</option>
+                  <option value="૧ – ૫ વર્ષ">૧ – ૫ વર્ષ</option>
+                  <option value="૫ – ૧૦ વર્ષ">૫ – ૧૦ વર્ષ</option>
+                  <option value="૧૦ – ૨૦ વર્ષ">૧૦ – ૨૦ વર્ષ</option>
+                  <option value="જન્મથી / પેઢીઓથી">જન્મથી / પેઢીઓથી</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold text-gray-700 block mb-1">સત્સંગ ડે (તારીખ અથવા તિથિ)</label>
+                <input
+                  type="text" placeholder='દા.ત. 15-08-2020 અથવા "શ્રાવણ સુદ ૧૫"'
+                  value={formData.satsangDay}
+                  onChange={(e) => setFormData({ ...formData, satsangDay: e.target.value })}
+                  className="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none placeholder:text-gray-400 placeholder:text-xs"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold text-gray-700 block mb-1">શું તમે સવારની કથા નિયમિત સાંભળો છો? <span className="text-rose-600">*</span></label>
+                <select value={formData.kathaListening} onChange={(e) => setFormData({ ...formData, kathaListening: e.target.value })} className="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none">
+                  <option value="">-- પસંદ કરો --</option>
+                  <option value="હા, હું દરરોજ સવારે લાઇવ કથા સાંભળુ છું">હા, હું દરરોજ સવારે લાઇવ કથા સાંભળુ છું</option>
+                  <option value="હા, હું ડિલે કથા સાંભળુ છું (મારા સમયે)">હા, હું ડિલે કથા સાંભળુ છું (મારા સમયે)</option>
+                  <option value="હું મોટા ભાગે કથા સાંભળુ છું">હું મોટા ભાગે કથા સાંભળુ છું</option>
+                  <option value="હું ક્યારેક કથા સાંભળુ છું">હું ક્યારેક કથા સાંભળુ છું</option>
+                  <option value="ના, હું કથા નથી સાંભળતો">ના, હું કથા નથી સાંભળતો</option>
+                </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-semibold text-gray-700 block mb-1">તમે સવારની મંગળા આરતી કરો છો? <span className="text-rose-600">*</span></label>
+                  <select value={formData.mangalaAarti} onChange={(e) => setFormData({ ...formData, mangalaAarti: e.target.value })} className="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none">
+                    <option value="">-- પસંદ કરો --</option>
+                    <option value="હા">હા</option>
+                    <option value="ના">ના</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-gray-700 block mb-1">ચેષ્ટા કરો છો? <span className="text-rose-600">*</span></label>
+                  <select value={formData.cheshta} onChange={(e) => setFormData({ ...formData, cheshta: e.target.value })} className="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none">
+                    <option value="">-- પસંદ કરો --</option>
+                    <option value="હા">હા</option>
+                    <option value="ના">ના</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold text-gray-700 block mb-1">સભામાં કેટલા વર્ષથી આવો છો?</label>
+                <select value={formData.sabhaYears} onChange={(e) => setFormData({ ...formData, sabhaYears: e.target.value })} className="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none">
+                  <option value="">-- પસંદ કરો --</option>
+                  <option value="૬ મહિના કરતા ઓછો">૬ મહિના કરતા ઓછો</option>
+                  <option value="૬ મહિના – ૧ વર્ષ">૬ મહિના – ૧ વર્ષ</option>
+                  <option value="૧ – ૩ વર્ષ">૧ – ૩ વર્ષ</option>
+                  <option value="૩ – ૫ વર્ષ">૩ – ૫ વર્ષ</option>
+                  <option value="૫ વર્ષ કરતા વધુ">૫ વર્ષ કરતા વધુ</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold text-gray-700 block mb-1">તમે રાત્રે કેટલા વાગ્યે સૂઈ જાવ છો? <span className="text-rose-600">*</span></label>
+                <select value={formData.sleepTime} onChange={(e) => setFormData({ ...formData, sleepTime: e.target.value })} className="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none">
+                  <option value="">-- પસંદ કરો --</option>
+                  {SLEEP_OPTIONS.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                </select>
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold text-gray-700 block mb-1">તમે કુંડળધામની શિબિર ભરો છો?</label>
+                <select value={formData.kundalShibir} onChange={(e) => setFormData({ ...formData, kundalShibir: e.target.value })} className="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none">
+                  <option value="">-- પસંદ કરો --</option>
+                  <option value="હા">હા</option>
+                  <option value="ના">ના</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold text-gray-700 block mb-1">જો તમે મૂર્તિબાગ ખાતે કોઈ સ્થાનિક સેવામાં નથી તો જોડાવા માંગો છો?</label>
+                <select value={formData.sevaInterest} onChange={(e) => setFormData({ ...formData, sevaInterest: e.target.value })} className="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none">
+                  <option value="">-- પસંદ કરો --</option>
+                  <option value="હા, મારે સેવામાં જોડાવાની ઇચ્છા છે">હા, મારે સેવામાં જોડાવાની ઇચ્છા છે</option>
+                  <option value="ના, મારે સ્થાનિક સેવા ચાલુ જ છે">ના, મારે સ્થાનિક સેવા ચાલુ જ છે</option>
+                  <option value="ના, મારે સેવામાં જોડાવાની હાલ ઇચ્છા નથી.">ના, મારે સેવામાં જોડાવાની હાલ ઇચ્છા નથી.</option>
+                </select>
+              </div>
+
+              {field('સ્થાનિક મુર્તિબાગમાં કઈ કઈ સેવાની જવાબદારી છે?', 'murtibaugSeva', { placeholder: HINT })}
+              {field('કુંડળ કે વડોદરાથી સંતો દ્વારા આવતી ડાયરેક્ટ સેવા?', 'directSevaSant', { placeholder: HINT })}
+
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 space-y-3">
+                <p className="text-xs font-bold text-amber-900">મિત્રોની વિગત (સત્સંગમાં જોડાયેલ)</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-xs font-semibold text-gray-700 block mb-1">મિત્ર ૧ નો મોબાઈલ <span className="text-rose-600">*</span></label>
+                    <input type="tel" maxLength="10" value={formData.friend1Mobile} onChange={(e) => handleFriend1MobileChange(e.target.value.replace(/\D/g, ''))} className="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none" />
+                    {friend1Found && <span className="text-[10px] text-emerald-600 font-bold">✓ સભ્ય મળ્યા — નામ auto-fill થયું</span>}
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-gray-700 block mb-1">મિત્ર ૧ નું નામ <span className="text-rose-600">*</span></label>
+                    <input type="text" value={formData.friend1Name} onChange={(e) => setFormData({ ...formData, friend1Name: e.target.value })} className="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none" />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-gray-700 block mb-1">મિત્ર ૨ નો મોબાઈલ <span className="text-rose-600">*</span></label>
+                    <input type="tel" maxLength="10" value={formData.friend2Mobile} onChange={(e) => handleFriend2MobileChange(e.target.value.replace(/\D/g, ''))} className="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none" />
+                    {friend2Found && <span className="text-[10px] text-emerald-600 font-bold">✓ સભ્ય મળ્યા — નામ auto-fill થયું</span>}
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-gray-700 block mb-1">મિત્ર ૨ નું નામ <span className="text-rose-600">*</span></label>
+                    <input type="text" value={formData.friend2Name} onChange={(e) => setFormData({ ...formData, friend2Name: e.target.value })} className="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none" />
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                {field('પર્સનલી ઓળખતા સંતો 1', 'knownSaint1', { half: true, placeholder: HINT })}
+                {field('પર્સનલી ઓળખતા સંતો 2', 'knownSaint2', { half: true, placeholder: HINT })}
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                {field('તમને ઓળખતા સ્થાનિક વડીલ ભક્તો ૧', 'localElderDevotees', { half: true, placeholder: HINT })}
+                {field('તમને ઓળખતા સ્થાનિક વડીલ ભક્તો ૨', 'localElderDevotee2', { half: true, placeholder: HINT })}
+              </div>
+
+              {field('હાલના પોષક લીડર', 'suggestedLeaderId', {
+                type: 'select',
+                options: (
+                  <>
+                    <option value="">-- પસંદ કરો (ખબર ના હોય તો ખાલી રાખો) --</option>
+                    {leaders.map(l => <option key={l.id} value={l.id}>{l.name} {l.area ? `(${l.area})` : ''}</option>)}
+                  </>
+                ),
+              })}
+
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 space-y-3">
+                <div className="flex justify-between items-center">
+                  <p className="text-xs font-bold text-blue-900">તમારે કેટલા બાળકો છે? (બાલિકા નહીં — ફક્ત દીકરા)</p>
+                  <button type="button" onClick={addSon} className="bg-blue-600 hover:bg-blue-700 text-white text-[11px] font-bold px-3 py-1.5 rounded-full">+ ઉમેરો</button>
+                </div>
+                {sons.length === 0 && <p className="text-[11px] text-gray-400">કોઈ ઉમેરેલ નથી. જો હોય તો "+ ઉમેરો" દબાવો.</p>}
+                {sons.map((son, idx) => (
+                  <div key={idx} className="bg-white rounded-lg p-2.5 border border-blue-200 space-y-2 relative">
+                    <button type="button" onClick={() => removeSon(idx)} className="absolute -top-2 -right-2 w-5 h-5 rounded-full bg-rose-600 text-white text-[10px] flex items-center justify-center shadow">✕</button>
+                    <p className="text-[11px] font-bold text-blue-800">દીકરો {idx + 1}</p>
+                    <input
+                      type="text" placeholder="નામ"
+                      value={son.name} onChange={(e) => updateSon(idx, 'name', e.target.value)}
+                      className="w-full border border-gray-300 rounded-lg p-2 text-xs focus:ring-2 focus:ring-orange-500 focus:outline-none"
+                    />
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="text-[10px] text-gray-500 block mb-0.5">જન્મ તારીખ</label>
+                        <input
+                          type="date"
+                          value={son.birthDate} onChange={(e) => updateSon(idx, 'birthDate', e.target.value)}
+                          className="w-full border border-gray-300 rounded-lg p-2 text-xs focus:ring-2 focus:ring-orange-500 focus:outline-none"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] text-gray-500 block mb-0.5">સત્સંગ તારીખ (અથવા તિથિ)</label>
+                        <input
+                          type="text" placeholder="તારીખ અથવા તિથિ"
+                          value={son.satsangDate} onChange={(e) => updateSon(idx, 'satsangDate', e.target.value)}
+                          className="w-full border border-gray-300 rounded-lg p-2 text-xs focus:ring-2 focus:ring-orange-500 focus:outline-none placeholder:text-gray-400"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {saveError && (
+                <div className="bg-rose-50 border border-rose-200 text-rose-700 text-xs font-semibold p-2.5 rounded-lg text-center">
+                  {saveError}
+                </div>
+              )}
+
+              {/* સેલ્ફી ફોટો */}
+              <div className="flex flex-col items-center space-y-2 pt-2 border-t">
+                <label className="text-xs font-semibold text-gray-700">સેલ્ફી ફોટો <span className="text-rose-600">*</span></label>
+                <div className="w-24 h-24 rounded-full overflow-hidden border-4 border-orange-200 bg-orange-50 flex items-center justify-center">
+                  {formData.photoUrl ? (
+                    <img src={formData.photoUrl} alt="Selfie" className="w-full h-full object-cover" />
+                  ) : (
+                    <i className="fa-solid fa-camera text-2xl text-orange-300"></i>
+                  )}
+                </div>
+                <input type="file" accept="image/*" capture="user" id="selfieInput" className="hidden" onChange={handlePhotoChange} />
+                <button
+                  type="button" disabled={isUploadingPhoto}
+                  onClick={() => document.getElementById('selfieInput').click()}
+                  className="bg-orange-100 text-orange-700 px-4 py-1.5 rounded-full text-xs font-bold disabled:opacity-60"
+                >
+                  {isUploadingPhoto ? 'અપલોડ થાય છે...' : (formData.photoUrl ? 'ફોટો બદલો' : '+ સેલ્ફી ફોટો ઉમેરો')}
+                </button>
+              </div>
+
+              <button
+                type="submit" disabled={isSaving}
+                className="w-full bg-orange-600 hover:bg-orange-700 disabled:opacity-60 text-white font-bold py-3 rounded-lg text-sm shadow"
+              >
+                {isSaving ? 'સેવ થાય છે...' : 'વિગતો સેવ કરો'}
+              </button>
+            </form>
+          </div>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>
