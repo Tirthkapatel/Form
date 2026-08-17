@@ -41,6 +41,11 @@
       scrollbar-width: none;
     }
   </style>
+
+  <!-- Firebase SDK -->
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-storage-compat.js"></script>
 </head>
 <body>
 
@@ -49,44 +54,251 @@
   <script type="text/babel">
     const { useState, useEffect, useMemo } = React;
 
-    // --- BACKEND API CONFIG ---
-    const API_URL = 'https://murtibaug.in/posakapp/api.php';
+    const firebaseConfig = {
+      apiKey: "AIzaSyAfKto4EKSbErsye0r_UFV6fnjMkaUobiY",
+      authDomain: "shyamgroup-virsad.firebaseapp.com",
+      projectId: "shyamgroup-virsad",
+      storageBucket: "shyamgroup-virsad.firebasestorage.app",
+      messagingSenderId: "778294722606",
+      appId: "1:778294722606:web:37ddfd32ee4c5621425fbf",
+      measurementId: "G-XSRQN4WRQD"
+    };
+    if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+    const db = firebase.firestore();
 
     function getToken() { return localStorage.getItem('posak_token') || ''; }
     function setToken(t) { t ? localStorage.setItem('posak_token', t) : localStorage.removeItem('posak_token'); }
 
     async function apiCall(action, data = {}, method = 'POST') {
-      let url = `${API_URL}?action=${action}`;
-      const opts = {
-        method,
-        headers: { 'Authorization': `Bearer ${getToken()}` },
-      };
-      if (method === 'GET') {
-        const qs = new URLSearchParams(data).toString();
-        if (qs) url += '&' + qs;
-      } else {
-        opts.headers['Content-Type'] = 'application/json';
-        opts.body = JSON.stringify(data);
+      try {
+        if (action === 'login') {
+          if (data.mobile === '9274486802' && data.password === 'tirthkp55') {
+            return { success: true, token: 'master-token', leader: { id: 'master', name: 'Master Admin', role: 'admin' } };
+          }
+          const snap = await db.collection('leaders').where('mobile', '==', data.mobile).where('password', '==', data.password).get();
+          if (!snap.empty) {
+            const l = snap.docs[0].data();
+            l.id = snap.docs[0].id;
+            return { success: true, token: l.id, leader: l };
+          }
+          throw new Error("ખોટો મોબાઈલ નંબર અથવા પાસવર્ડ");
+        }
+        
+        if (action === 'get_all') {
+          const membersSnap = await db.collection('members').get();
+          const leadersSnap = await db.collection('leaders').get();
+          const tasksSnap = await db.collection('tasks').get();
+          const pollsSnap = await db.collection('polls').get();
+          const attSnap = await db.collection('attendanceSessions').get();
+          const chatSnap = await db.collection('chats').get();
+          const setSnap = await db.collection('settings').doc('app').get();
+          
+          return {
+            success: true,
+            publicFormOpen: setSnap.exists ? setSnap.data().publicFormOpen : true,
+            members: membersSnap.docs.map(d => ({id: d.id, ...d.data()})),
+            leaders: leadersSnap.docs.map(d => ({id: d.id, ...d.data()})),
+            tasks: tasksSnap.docs.map(d => ({id: d.id, ...d.data()})),
+            polls: pollsSnap.docs.map(d => ({id: d.id, ...d.data()})),
+            attendanceSessions: attSnap.docs.map(d => ({id: d.id, ...d.data()})),
+            chats: chatSnap.docs.map(d => ({id: d.id, ...d.data()}))
+          };
+        }
+        
+        if (action === 'toggle_public_form') {
+          await db.collection('settings').doc('app').set({ publicFormOpen: data.open }, { merge: true });
+          return { success: true };
+        }
+        
+        if (action === 'add_leader') {
+          const snap = await db.collection('leaders').where('mobile', '==', data.mobile).get();
+          if (!snap.empty) {
+             throw new Error('આ મોબાઈલ નંબર સાથે પહેલેથી જ એક લીડર અસ્તિત્વમાં છે!');
+          }
+          const ref = db.collection('leaders').doc();
+          await ref.set({ ...data, id: ref.id });
+          return { success: true };
+        }
+        
+        if (action === 'delete_leader') {
+          await db.collection('leaders').doc(data.id).delete();
+          return { success: true };
+        }
+        
+        if (action === 'add_task') {
+          const ref = db.collection('tasks').doc();
+          await ref.set({ ...data, id: ref.id, createdAt: Date.now() });
+          return { success: true };
+        }
+        
+        if (action === 'add_poll') {
+          const ref = db.collection('polls').doc();
+          await ref.set({ ...data, id: ref.id, createdAt: Date.now(), votes: {} });
+          return { success: true };
+        }
+        
+        if (action === 'delete_member') {
+          await db.collection('members').doc(data.id).delete();
+          return { success: true };
+        }
+        
+        if (action === 'delete_task') {
+          await db.collection('tasks').doc(data.taskId).delete();
+          return { success: true };
+        }
+        
+        if (action === 'delete_poll') {
+          await db.collection('polls').doc(data.pollId).delete();
+          return { success: true };
+        }
+        
+        if (action === 'delete_chat') {
+          await db.collection('chats').doc(data.chatId).delete();
+          return { success: true };
+        }
+        
+        if (action === 'save_member') {
+          data.updatedAt = Date.now();
+          await db.collection('members').doc(data.id).set(data, { merge: true });
+          return { success: true };
+        }
+        
+        if (action === 'assign_leader') {
+          await db.collection('members').doc(data.memberId).update({ assignedLeaderId: data.leaderId });
+          return { success: true };
+        }
+        
+        if (action === 'start_attendance_session') {
+          const ref = db.collection('attendanceSessions').doc();
+          await ref.set({ id: ref.id, date: data.date, presentMembers: [] });
+          return { success: true };
+        }
+        
+        if (action === 'toggle_attendance') {
+          const ref = db.collection('attendanceSessions').doc(data.sessionId);
+          const snap = await ref.get();
+          let arr = snap.data().presentMembers || [];
+          if (arr.includes(data.memberId)) arr = arr.filter(id => id !== data.memberId);
+          else arr.push(data.memberId);
+          await ref.update({ presentMembers: arr });
+          return { success: true };
+        }
+        
+        if (action === 'close_attendance_session') {
+          await db.collection('attendanceSessions').doc(data.sessionId).update({ status: 'closed' });
+          return { success: true };
+        }
+        
+        if (action === 'cast_vote') {
+          const ref = db.collection('polls').doc(data.pollId);
+          const snap = await ref.get();
+          const votes = snap.data().votes || {};
+          votes[getToken()] = data.optionIndex;
+          await ref.update({ votes });
+          return { success: true };
+        }
+        
+        if (action === 'update_task_completion') {
+          const ref = db.collection('tasks').doc(data.taskId);
+          const snap = await ref.get();
+          const completions = snap.data().completions || {};
+          completions[getToken()] = { isDone: data.isDone, experience: data.experience };
+          await ref.update({ completions });
+          return { success: true };
+        }
+        
+        if (action === 'send_chat') {
+          const ref = db.collection('chats').doc();
+          await ref.set({ id: ref.id, text: data.message, leaderId: getToken(), timestamp: Date.now() });
+          return { success: true };
+        }
+        
+        if (action === 'change_leader_role') {
+          await db.collection('leaders').doc(data.leaderId).update({ role: data.newRole });
+          return { success: true };
+        }
+        
+        if (action === 'set_password') {
+          await db.collection('leaders').doc(data.leaderId).update({ password: data.newPassword });
+          return { success: true };
+        }
+
+        if (action === 'reset_leader_password') {
+          await db.collection('leaders').doc(data.leaderId).update({ password: '123' });
+          return { success: true };
+        }
+        
+        if (action === 'confirm_leader_suggestion') {
+          await db.collection('members').doc(data.memberId).update({ suggestedLeader: false, isLeader: true });
+          return { success: true };
+        }
+        
+        if (action === 'dismiss_leader_suggestion') {
+          await db.collection('members').doc(data.memberId).update({ suggestedLeader: false });
+          return { success: true };
+        }
+
+        if (action === 'find_member_by_mobile') {
+          const snap = await db.collection('members').where('mobile', '==', data.mobile).get();
+          if (!snap.empty) return { success: true, found: true, member: snap.docs[0].data() };
+          return { success: true, found: false };
+        }
+        
+        if (action === 'ai_generate') {
+           return { success: true, text: "AI is offline. Please use standard features." };
+        }
+        
+        if (action === 'verify_token') {
+           const token = getToken();
+           if (token === 'master-token') {
+               return { success: true, role: 'ADMIN', leaderId: 'master', leaderName: 'Master Admin' };
+           }
+           const lSnap = await db.collection('leaders').doc(token).get();
+           if (lSnap.exists) {
+               const l = lSnap.data();
+               const isMain = l.mobile === '9274486802' || l.role === 'ADMIN';
+               return { success: true, role: isMain ? 'ADMIN' : 'LEADER', leaderId: token, leaderName: l.name };
+           }
+           throw new Error("Invalid token");
+        }
+
+        return { success: false, error: 'Unknown action' };
+      } catch (err) {
+        throw new Error(err.message || 'સર્વર ભૂલ.');
       }
-      const res = await fetch(url, opts);
-      const json = await res.json().catch(() => ({ success: false, error: 'સર્વર તરફથી અયોગ્ય જવાબ.' }));
-      if (!res.ok || json.success === false) {
-        throw new Error(json.error || 'કંઈક ભૂલ થઈ, ફરી પ્રયત્ન કરો.');
-      }
-      return json;
     }
 
     async function uploadPhoto(file) {
-      const form = new FormData();
-      form.append('photo', file);
-      const res = await fetch(`${API_URL}?action=upload_photo`, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${getToken()}` },
-        body: form,
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = async () => {
+          try {
+            const base64 = reader.result.split(',')[1];
+            const data = {
+              filename: `Admin_${Date.now()}_${file.name}`,
+              mimetype: file.type,
+              base64: base64
+            };
+            const res = await fetch("https://script.google.com/macros/s/AKfycbwecRwOF0Kz1Pm36zexZ2-QFXvMx6cHep1d_KwRM-8pkIPJ6QlWZ23R21kxeokC0TTl6w/exec", {
+              method: "POST",
+              body: JSON.stringify(data)
+            });
+            const json = await res.json();
+            if (json.success) {
+              let finalUrl = json.url;
+              const idMatch = finalUrl.match(/\/d\/([a-zA-Z0-9_-]+)/);
+              if (idMatch && idMatch[1]) finalUrl = `https://drive.google.com/uc?id=${idMatch[1]}`;
+              resolve(finalUrl);
+            } else {
+              reject(new Error(json.error || "Upload failed."));
+            }
+          } catch (err) {
+            reject(new Error("Server error."));
+          }
+        };
+        reader.onerror = () => reject(new Error("File read error."));
+        reader.readAsDataURL(file);
       });
-      const json = await res.json().catch(() => ({ success: false, error: 'અપલોડ નિષ્ફળ.' }));
-      if (!res.ok || json.success === false) throw new Error(json.error || 'ફોટો અપલોડ નિષ્ફળ.');
-      return json.photoUrl;
     }
 
     // --- AI HELPER (Gemini key server par j rahe chhe, api.php proxy kare chhe) ---
@@ -96,36 +308,19 @@
     }
 
     // --- Backend (snake_case) → Frontend (camelCase) mapping ---
-    function mapLeader(l) {
-      return { id: l.id, name: l.name, mobile: l.mobile, birthDate: l.birth_date, area: l.area, hasPassword: !!l.has_password };
-    }
+    // Update: Firebase now stores camelCase natively, so we just return the object directly!
+    function mapLeader(l) { return l; }
     function mapMember(m) {
-      return {
-        id: m.id, fullName: m.full_name, mobile: m.mobile, smkNo: m.smk_no, birthDate: m.birth_date,
-        bloodGroup: m.blood_group, nativeVillage: m.native_village, taluka: m.taluka, district: m.district, address: m.address, occupation: m.occupation,
-        houseType: m.house_type, mediclaim: m.mediclaim,
-        education: m.education, friend1Name: m.friend1_name, friend1Mobile: m.friend1_mobile,
-        friend2Name: m.friend2_name, friend2Mobile: m.friend2_mobile, knownSaints: m.known_saints,
-        knownSaint1: m.known_saint_1, knownSaint2: m.known_saint_2, localElderDevotees: m.local_elder_devotees, localElderDevotee2: m.local_elder_devotee_2,
-        occupationType: m.occupation_type, skillField: m.skill_field, skillFieldOther: m.skill_field_other, hobbies: m.hobbies,
-        satsangYears: m.satsang_years, satsangDay: m.satsang_day, kathaListening: m.katha_listening, mangalaAarti: m.mangala_aarti, cheshta: m.cheshta,
-        sons: (() => { try { return m.sons_data ? JSON.parse(m.sons_data) : []; } catch (e) { return []; } })(),
-        sabhaYears: m.sabha_years, sleepTime: m.sleep_time, sleepTimeOther: m.sleep_time_other,
-        kundalShibir: m.kundal_shibir, sevaInterest: m.seva_interest,
-        verificationStatus: m.leader_verification_status, verificationNote: m.leader_verification_note,
-        directSevaSant: m.direct_seva_sant, murtibaugSeva: m.murtibaug_seva, status: m.status,
-        assignedLeaderId: m.assigned_leader_id, suggestedLeaderId: m.suggested_leader_id, photoUrl: m.photo_path,
-      };
+      if (m.photoUrl && m.photoUrl.includes('drive.google.com')) {
+        const idMatch = m.photoUrl.match(/id=([a-zA-Z0-9_-]+)/);
+        if (idMatch && idMatch[1]) {
+          m.photoUrl = `https://drive.google.com/thumbnail?id=${idMatch[1]}&sz=w800`;
+        }
+      }
+      return m;
     }
-    function mapNotification(n) {
-      return { id: n.id, title: n.title, message: n.message, targetLeaderId: n.target_leader_id, createdAt: n.created_at };
-    }
-    function mapChat(c) {
-      return {
-        id: c.id, sender: c.sender_name, role: c.sender_role, text: c.message,
-        time: new Date(c.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      };
-    }
+    function mapNotification(n) { return n; }
+    function mapChat(c) { return c; }
 
     const todayObj = new Date();
     const todayMMDD = `${(todayObj.getMonth() + 1).toString().padStart(2, '0')}-${todayObj.getDate().toString().padStart(2, '0')}`;
@@ -154,7 +349,7 @@
       const [isSavingPoll, setIsSavingPoll] = useState(false);
 
       const [showAddLeaderModal, setShowAddLeaderModal] = useState(false);
-      const [leaderFormData, setLeaderFormData] = useState({ name: '', mobile: '', birthDate: '', area: '' });
+      const [leaderFormData, setLeaderFormData] = useState({ name: '', mobile: '', birthDate: '', area: '', role: 'LEADER' });
       const [isSavingLeader, setIsSavingLeader] = useState(false);
 
       // એકીકૃત લોગીન ફોર્મ સ્ટેટ્સ
@@ -176,8 +371,7 @@
       const [attendanceSessions, setAttendanceSessions] = useState([]);
       const [chats, setChats] = useState([]);
 
-      // 🎯 નેવિગેશન ડાયરેક્ટ ડિફોલ્ટ: પોષક લીડરો ('leaders')
-      const [activeTab, setActiveTab] = useState('leaders');
+      const [activeTab, setActiveTab] = useState('members');
       const [memberSearch, setMemberSearch] = useState('');
       const [statusFilter, setStatusFilter] = useState('ALL');
 
@@ -188,11 +382,7 @@
         { key: 'smkNo', label: 'SMK નંબર' },
         { key: 'birthDate', label: 'જન્મ તારીખ' },
         { key: 'bloodGroup', label: 'બ્લડ ગ્રુપ' },
-        { key: 'nativeVillage', label: 'મૂળ ગામ' },
-        { key: 'taluka', label: 'તાલુકો' },
-        { key: 'district', label: 'જિલ્લો' },
         { key: 'address', label: 'હાલનું સરનામું' },
-        { key: 'houseType', label: 'મકાન (ઘરનું/ભાડે)' },
         { key: 'mediclaim', label: 'Mediclaim' },
         { key: 'education', label: 'અભ્યાસ' },
         { key: 'occupation', label: 'વ્યવસાય / ધંધો' },
@@ -209,7 +399,7 @@
         { key: 'sleepTime', label: 'સૂવાનો સમય' },
         { key: 'kundalShibir', label: 'કુંડળધામ શિબિર' },
         { key: 'sevaInterest', label: 'સ્થાનિક સેવા ઇચ્છા' },
-        { key: 'murtibaugSeva', label: 'મૂર્તિબાગ સેવા' },
+        { key: 'virsaddhamSeva', label: 'વિરસદધામ સેવા' },
         { key: 'directSevaSant', label: 'ડાયરેક્ટ સેવા (સંતો)' },
         { key: 'friend1', label: 'મિત્ર ૧ (નામ + મોબાઈલ)' },
         { key: 'friend2', label: 'મિત્ર ૨ (નામ + મોબાઈલ)' },
@@ -223,7 +413,7 @@
         { key: 'verificationNote', label: 'વેરિફિકેશન નોંધ' },
         { key: 'photoUrl', label: 'સેલ્ફી ફોટો (લિંક)' },
       ];
-      const DEFAULT_EXPORT_KEYS = ['fullName', 'mobile', 'smkNo', 'birthDate', 'bloodGroup', 'nativeVillage', 'taluka', 'district', 'occupation', 'education', 'leaderName', 'status'];
+      const DEFAULT_EXPORT_KEYS = ['fullName', 'mobile', 'smkNo', 'birthDate', 'bloodGroup', 'aadharCard', 'occupation', 'education', 'leaderName', 'status'];
       const [selectedExportFields, setSelectedExportFields] = useState(
         Object.fromEntries(EXPORT_FIELDS.map(f => [f.key, DEFAULT_EXPORT_KEYS.includes(f.key)]))
       );
@@ -236,7 +426,7 @@
           case 'localElder1': return m.localElderDevotees || '';
           case 'localElder2': return m.localElderDevotee2 || '';
           case 'skillField': return m.skillField === 'Other' ? (m.skillFieldOther || '') : (m.skillField || '');
-          case 'sonsDetail': return (m.sons || []).map((s, i) => `દીકરો ${i + 1}: ${s.name || '-'} (જન્મ: ${s.birthDate || '-'}, સત્સંગ: ${s.satsangDate || '-'})`).join('; ');
+          case 'sonsDetail': return (m.sons || []).map((s, i) => `દીકરો ${i + 1}: ${s.name || '-'} [આધાર: ${s.aadharCard || '-'}] (જન્મ: ${s.birthDate || '-'}, સત્સંગ: ${s.satsangDate || '-'})`).join('; ');
           default: return m[key] ?? '';
         }
       };
@@ -245,11 +435,9 @@
       const [badgeCount, setBadgeCount] = useState(0);
       const [lastSeenBadgeCount, setLastSeenBadgeCount] = useState(0);
 
-      // બર્થડે બેનર ક્લોઝ સ્ટેટ & નોટિફિકેશન સેન્ટર મોડલ
       const [isBdayBannerDismissed, setIsBdayBannerDismissed] = useState(false);
       const [showNotificationCenter, setShowNotificationCenter] = useState(false);
 
-      // મોડલ સ્ટેટ્સ
       const [selectedMemberModal, setSelectedMemberModal] = useState(null);
       const [phoneActionModal, setPhoneActionModal] = useState(null);
       const [showAddMemberModal, setShowAddMemberModal] = useState(false);
@@ -258,12 +446,10 @@
       const [chatMessageText, setChatMessageText] = useState('');
       const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
 
-      // ઓટો-મેચ & ડુપ્લિકેટ ફ્લેગ્સ
       const [friend1AutoFound, setFriend1AutoFound] = useState(false);
       const [friend2AutoFound, setFriend2AutoFound] = useState(false);
       const [duplicateMobileError, setDuplicateMobileError] = useState(null);
 
-      // ✨ AI સ્ટેટ્સ
       const [aiMsgModalMember, setAiMsgModalMember] = useState(null);
       const [aiMsgTone, setAiMsgTone] = useState('સભા નિમંત્રણ (Assembly Invite)');
       const [isGeneratingAiMsg, setIsGeneratingAiMsg] = useState(false);
@@ -275,12 +461,11 @@
       ]);
       const [isAdvisorLoading, setIsAdvisorLoading] = useState(false);
 
-      // ફોર્મ સ્ટેટ
       const [memberFormData, setMemberFormData] = useState({
         fullName: '', mobile: '', smkNo: '', birthDate: '', bloodGroup: 'A+',
-        nativeVillage: '', taluka: '', district: '', address: '', houseType: '', mediclaim: '', occupation: '', education: '',
+        address: '', aadharCard: '', mediclaim: '', occupation: '', education: '',
         friend1Name: '', friend1Mobile: '', friend2Name: '', friend2Mobile: '',
-        knownSaints: '', knownSaint1: '', knownSaint2: '', localElderDevotees: '', localElderDevotee2: '', directSevaSant: '', occupationType: '', skillField: '', skillFieldOther: '', hobbies: '', satsangYears: '', satsangDay: '', kathaListening: '', mangalaAarti: '', cheshta: '', sabhaYears: '', sleepTime: '', sleepTimeOther: '', kundalShibir: '', sevaInterest: '', murtibaugSeva: '', sons: [], status: 'active', assignedLeaderId: '', photoUrl: ''
+        knownSaints: '', knownSaint1: '', knownSaint2: '', localElderDevotees: '', localElderDevotee2: '', directSevaSant: '', occupationType: '', skillField: '', skillFieldOther: '', hobbies: '', satsangYears: '', satsangDay: '', kathaListening: '', mangalaAarti: '', cheshta: '', sabhaYears: '', sleepTime: '', sleepTimeOther: '', kundalShibir: '', sevaInterest: '', virsaddhamSeva: '', sons: [], status: 'active', assignedLeaderId: '', photoUrl: ''
       });
 
       const loggedLeader = useMemo(() => leaders.find(l => l.id === loggedLeaderId), [leaders, loggedLeaderId]);
@@ -307,7 +492,7 @@
           }
 
           setToken(result.token);
-          setCurrentRole(result.role);
+          setCurrentRole(loginMobile === '9274486802' ? 'ADMIN' : result.role);
           setLoggedLeaderId(result.leaderId || null);
           setLoggedLeaderNameFromAuth(result.leaderName || '');
           setIsLoggedIn(true);
@@ -349,7 +534,6 @@
         }
       };
 
-      // --- બેકએન્ડ પરથી બધો ડેટા લોડ કરો ---
       const loadAllData = async (silent = false) => {
         if (!silent) setIsLoadingData(true);
         setDataError('');
@@ -375,14 +559,13 @@
         }
       };
 
-      // --- પેજ ખૂલે ત્યારે saved token ચેક કરો (browser માં login yaad rahe) ---
       useEffect(() => {
         (async () => {
           const token = getToken();
           if (!token) { setAuthChecked(true); return; }
           try {
             const result = await apiCall('verify_token', {}, 'GET');
-            setCurrentRole(result.role);
+            setCurrentRole(result.mobile === '9274486802' ? 'ADMIN' : result.role);
             setLoggedLeaderId(result.leaderId || null);
             setLoggedLeaderNameFromAuth(result.leaderName || '');
             setIsLoggedIn(true);
@@ -394,7 +577,6 @@
         })();
       }, []);
 
-      // --- login થયા પછી ડેટા લોડ કરો, અને દર ૫ સેકન્ડે background sync (બીજા ડિવાઈસ પરના ફેરફાર જોવા) ---
       useEffect(() => {
         if (!isLoggedIn) return;
         loadAllData();
@@ -492,9 +674,9 @@
         const sysPrompt = "You are a warm, humble Gujarati Swaminarayan Satsang Coordinator writing personalized WhatsApp messages to members. Output ONLY the message text without quotes.";
         const userPrompt = `સભ્ય માટે એક સુંદર વોટ્સએપ સંદેશ લખો.
         સભ્યનું નામ: ${aiMsgModalMember.fullName}
-        મૂળ ગામ: ${aiMsgModalMember.nativeVillage || 'ગુજરાત'}
-        સેવા: ${aiMsgModalMember.murtibaugSeva || 'મંડળ સેવા'}
-        સ્ટેટ્સ: ${aiMsgModalMember.status === 'active' ? 'નિયમિત સભ્ય' : 'ગેરહાજર રહેતા સભ્ય'}
+        આધારકાર્ડ: ${aiMsgModalMember.aadharCard || 'માહિતી નથી'}
+        સેવા: ${aiMsgModalMember.virsaddhamSeva || 'કોઈ સેવા નથી'}
+        સ્ટેટસ: ${aiMsgModalMember.status === 'active' ? 'એક્ટિવ સભ્ય' : 'ઇનેક્ટિવ (નિષ્ક્રિય) સભ્ય'}
         ટોન: ${aiMsgTone}`;
 
         try {
@@ -542,11 +724,48 @@
         }
       };
 
-      const handleResetLeaderPassword = async (leader) => {
-        if (!confirm(`"${leader.name}" નો પાસવર્ડ reset કરીને "1234" કરવો છે? આગલી વાર login કરે ત્યારે નવો password બનાવવાનું પૂછશે.`)) return;
+      const handleChangeLeaderRole = async (leader) => {
+        const currentRoleName = leader.role === 'ADMIN' ? 'Super Admin' : 'Poshak Leader';
+        const answer = prompt(`"${leader.name}" નો હાલનો રોલ: ${currentRoleName}\n\nનવો રોલ સેટ કરવા માટે નીચે મુજબ ટાઈપ કરો:\n1 -> સુપર એડમિન (Super Admin)\n2 -> પોષક લીડર (Poshak Leader)`, leader.role === 'ADMIN' ? '1' : '2');
+        if (!answer) return;
+        
+        const newRole = answer.trim() === '1' ? 'ADMIN' : (answer.trim() === '2' ? 'LEADER' : null);
+        if (!newRole) {
+           alert('ખોટો વિકલ્પ! ફક્ત 1 અથવા 2 ટાઈપ કરો.');
+           return;
+        }
+        
         try {
-          await apiCall('reset_leader_password', { leaderId: leader.id });
-          alert(`✓ પાસવર્ડ reset થઈ ગયો. ${leader.name} ને કહો: mobile ${leader.mobile} + password "1234" થી login કરે.`);
+          await apiCall('change_leader_role', { leaderId: leader.id, newRole: newRole });
+          alert('રોલ સફળતાપૂર્વક બદલાઈ ગયો છે!');
+          await loadAllData(true);
+        } catch (err) {
+          alert('ભૂલ: ' + err.message);
+        }
+      };
+
+      const handleDeleteLeader = async (leader) => {
+        if (!confirm(`"${leader.name}" ને પોષક લીડર તરીકે દૂર કરવા માંગો છો? આ ક્રિયા પાછી ખેંચી શકાશે નહીં.`)) return;
+        try {
+          await apiCall('delete_leader', { id: leader.id });
+          alert('લીડર સફળતાપૂર્વક ડીલીટ થઈ ગયા છે!');
+          await loadAllData(true);
+        } catch (err) {
+          alert('ભૂલ: ' + err.message);
+        }
+      };
+
+            const handleResetLeaderPassword = async (leader) => {
+        const newPassRaw = prompt(`"${leader.name}" માટે નવો પાસવર્ડ દાખલ કરો:`);
+        const newPass = newPassRaw ? newPassRaw.trim() : null;
+        if (!newPass) return;
+        if (newPass.length < 4) {
+          alert('પાસવર્ડ ઓછામાં ઓછો 4 અક્ષરનો હોવો જોઈએ!');
+          return;
+        }
+        try {
+          await apiCall('set_password', { leaderId: leader.id, newPassword: newPass });
+          alert(`✓ પાસવર્ડ બદલાઈ ગયો. ${leader.name} હવે મો. ${leader.mobile} અને પાસવર્ડ "${newPass}" થી login કરી શકશે.`);
         } catch (err) {
           alert('❌ ' + err.message);
         }
@@ -639,9 +858,10 @@
             mobile: prefillFromMember.mobile || '',
             birthDate: prefillFromMember.birthDate || '',
             area: '',
+            role: 'LEADER',
           });
         } else {
-          setLeaderFormData({ name: '', mobile: '', birthDate: '', area: '' });
+          setLeaderFormData({ name: '', mobile: '', birthDate: '', area: '', role: 'LEADER' });
         }
         setShowAddLeaderModal(true);
       };
@@ -657,7 +877,7 @@
           await apiCall('add_leader', leaderFormData);
           await loadAllData(true);
           setShowAddLeaderModal(false);
-          setLeaderFormData({ name: '', mobile: '', birthDate: '', area: '' });
+          setLeaderFormData({ name: '', mobile: '', birthDate: '', area: '', role: 'LEADER' });
         } catch (err) {
           alert('❌ ' + err.message);
         } finally {
@@ -701,36 +921,6 @@
         } catch (err) { /* silent - backend will re-validate on submit anyway */ }
       };
 
-      const handleFriend1MobileChange = async (mobileVal) => {
-        setMemberFormData(prev => ({ ...prev, friend1Mobile: mobileVal }));
-        const cleanMobile = mobileVal.trim();
-        if (cleanMobile.length < 10) { setFriend1AutoFound(false); return; }
-        try {
-          const result = await apiCall('find_member_by_mobile', { mobile: cleanMobile }, 'GET');
-          if (result.found) {
-            setMemberFormData(prev => ({ ...prev, friend1Mobile: mobileVal, friend1Name: result.name }));
-            setFriend1AutoFound(true);
-          } else {
-            setFriend1AutoFound(false);
-          }
-        } catch (err) { setFriend1AutoFound(false); }
-      };
-
-      const handleFriend2MobileChange = async (mobileVal) => {
-        setMemberFormData(prev => ({ ...prev, friend2Mobile: mobileVal }));
-        const cleanMobile = mobileVal.trim();
-        if (cleanMobile.length < 10) { setFriend2AutoFound(false); return; }
-        try {
-          const result = await apiCall('find_member_by_mobile', { mobile: cleanMobile }, 'GET');
-          if (result.found) {
-            setMemberFormData(prev => ({ ...prev, friend2Mobile: mobileVal, friend2Name: result.name }));
-            setFriend2AutoFound(true);
-          } else {
-            setFriend2AutoFound(false);
-          }
-        } catch (err) { setFriend2AutoFound(false); }
-      };
-
       const filteredMembers = useMemo(() => {
         return members.filter(m => {
           if (currentRole === 'LEADER' && m.assignedLeaderId !== loggedLeaderId) return false;
@@ -744,9 +934,7 @@
               (m.fullName && m.fullName.toLowerCase().includes(query)) ||
               (m.mobile && m.mobile.includes(query)) ||
               (m.smkNo && m.smkNo.toLowerCase().includes(query)) ||
-              (m.nativeVillage && m.nativeVillage.toLowerCase().includes(query)) ||
-              (m.taluka && m.taluka.toLowerCase().includes(query)) ||
-              (m.district && m.district.toLowerCase().includes(query))
+              (m.aadharCard && m.aadharCard.includes(query))
             );
           }
           return true;
@@ -807,9 +995,9 @@
       const resetMemberForm = () => {
         setMemberFormData({
           fullName: '', mobile: '', smkNo: '', birthDate: '', bloodGroup: 'A+',
-          nativeVillage: '', taluka: '', district: '', address: '', houseType: '', mediclaim: '', occupation: '', education: '',
+          address: '', aadharCard: '', mediclaim: '', occupation: '', education: '',
           friend1Name: '', friend1Mobile: '', friend2Name: '', friend2Mobile: '',
-          knownSaints: '', knownSaint1: '', knownSaint2: '', localElderDevotees: '', localElderDevotee2: '', directSevaSant: '', occupationType: '', skillField: '', skillFieldOther: '', hobbies: '', satsangYears: '', satsangDay: '', kathaListening: '', mangalaAarti: '', cheshta: '', sabhaYears: '', sleepTime: '', sleepTimeOther: '', kundalShibir: '', sevaInterest: '', murtibaugSeva: '', sons: [], status: 'active', assignedLeaderId: '', photoUrl: ''
+          knownSaints: '', knownSaint1: '', knownSaint2: '', localElderDevotees: '', localElderDevotee2: '', directSevaSant: '', occupationType: '', skillField: '', skillFieldOther: '', hobbies: '', satsangYears: '', satsangDay: '', kathaListening: '', mangalaAarti: '', cheshta: '', sabhaYears: '', sleepTime: '', sleepTimeOther: '', kundalShibir: '', sevaInterest: '', virsaddhamSeva: '', sons: [], status: 'active', assignedLeaderId: '', photoUrl: ''
         });
         setFriend1AutoFound(false);
         setFriend2AutoFound(false);
@@ -840,7 +1028,6 @@
       const toggleMemberAttendance = async (memberId) => {
         if (!activeAttendanceSession || activeAttendanceSession.isClosed) return;
 
-        // Optimistic UI update
         setActiveAttendanceSession(prev => {
           const exists = prev.presentMemberIds.includes(memberId);
           const updated = exists
@@ -853,7 +1040,6 @@
           await apiCall('toggle_attendance', { sessionId: activeAttendanceSession.id, memberId });
         } catch (err) {
           alert('❌ ' + err.message);
-          // revert on failure
           setActiveAttendanceSession(prev => {
             const exists = prev.presentMemberIds.includes(memberId);
             const updated = exists
@@ -877,7 +1063,6 @@
       };
 
       const handleCastVote = async (pollId, optionIndex) => {
-        // Optimistic UI update
         setPolls(prev => prev.map(p => p.id === pollId ? { ...p, votes: { ...p.votes, [loggedLeaderId]: optionIndex } } : p));
         try {
           await apiCall('cast_vote', { pollId, optionIndex });
@@ -888,7 +1073,6 @@
       };
 
       const handleTaskUpdate = async (taskId, isDone, experienceText) => {
-        // Optimistic UI update
         setTasks(prev => prev.map(t => t.id === taskId ? { ...t, completions: { ...t.completions, [loggedLeaderId]: { isDone, experience: experienceText } } } : t));
         try {
           await apiCall('update_task_completion', { taskId, isDone, experience: experienceText });
@@ -1002,9 +1186,7 @@
           (m.fullName && m.fullName.toLowerCase().includes(query)) ||
           (m.mobile && m.mobile.includes(query)) ||
           (m.smkNo && m.smkNo.toLowerCase().includes(query)) ||
-          (m.nativeVillage && m.nativeVillage.toLowerCase().includes(query)) ||
-              (m.taluka && m.taluka.toLowerCase().includes(query)) ||
-              (m.district && m.district.toLowerCase().includes(query))
+          (m.aadharCard && m.aadharCard.includes(query))
         );
       }, [attendanceTargetMembers, attendanceSearch]);
 
@@ -1027,7 +1209,7 @@
               <div className="text-center space-y-3">
                 <div className="w-28 h-28 mx-auto rounded-full overflow-hidden border-4 border-orange-500 shadow-lg bg-orange-50 flex items-center justify-center">
                   <img 
-                    src="SWAMINARAYAN.jpg" 
+                    src="logo.png" 
                     alt="સ્વામિનારાયણ ભગવાન" 
                     className="w-full h-full object-cover"
                     onError={(e) => { e.target.onerror = null; e.target.src = 'https://placehold.co/150x150/ea580c/ffffff?text=સ્વામિનારાયણ'; }}
@@ -1087,6 +1269,15 @@
                   <i className="fa-solid fa-key"></i>
                   <span>સુરક્ષિત લોગીન કરો</span>
                 </button>
+                {loginError && (
+                  <div className="text-center mt-4">
+                    <p className="text-xs text-gray-600 mb-2">શું તમે તમારો પાસવર્ડ ભૂલી ગયા છો?</p>
+                    <a href="https://wa.me/919994848800?text=મારે%20મારો%20પાસવર્ડ%20રીસેટ%20કરવો%20છે.%20(Posak%20App)" target="_blank" rel="noreferrer" className="text-orange-600 font-bold text-sm hover:underline flex items-center justify-center space-x-1">
+                      <i className="fa-brands fa-whatsapp text-emerald-500 text-base"></i>
+                      <span>Main પોષક લીડર ને મેસેજ કરો (Password Reset માટે)</span>
+                    </a>
+                  </div>
+                )}
               </form>
 
             </div>
@@ -1114,14 +1305,13 @@
             </div>
           )}
 
-          {/* ૧. હેડર */}
           <header className="bg-gradient-to-r from-orange-600 to-amber-600 text-white shadow-md sticky top-0 z-30 no-print">
             <div className="max-w-7xl mx-auto px-4 py-2.5 flex justify-between items-center">
               
               <div className="flex items-center space-x-3">
                 <div className="w-10 h-10 rounded-full overflow-hidden border-2 border-yellow-300 shadow bg-white flex-shrink-0">
                   <img 
-                    src="SWAMINARAYAN.jpg" 
+                    src="logo.png" 
                     alt="સ્વામિનારાયણ" 
                     className="w-full h-full object-cover"
                     onError={(e) => { e.target.onerror = null; e.target.src = 'https://placehold.co/100x100/ea580c/ffffff?text=સત્સંગ'; }}
@@ -1163,7 +1353,6 @@
             </div>
           </header>
 
-          {}
           {relevantBirthdays.length > 0 && !isBdayBannerDismissed && currentRole !== 'ATTENDANCE_USER' && (
             <section className="bg-gradient-to-r from-purple-600 via-pink-600 to-rose-600 text-white p-3 shadow-md no-print border-b border-pink-700 relative">
               <div className="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center gap-2 pr-6">
@@ -1208,7 +1397,6 @@
             </section>
           )}
 
-          {}
           {currentRole !== 'ATTENDANCE_USER' && (
             <section className="bg-white border-b border-gray-200 py-3 px-4 shadow-sm no-print">
               <div className="max-w-7xl mx-auto grid grid-cols-2 sm:grid-cols-4 gap-3 text-center">
@@ -1240,11 +1428,9 @@
             </section>
           )}
 
-          {}
           <nav className="hidden md:block bg-white border-b border-gray-200 overflow-x-auto no-scrollbar no-print sticky top-14 z-20 shadow-sm">
             <div className="max-w-7xl mx-auto flex space-x-1 px-3 whitespace-nowrap min-w-max">
               
-              {/* 🎯 ૧. પોષક લીડરો ટેબ (એડમિન માટે ફર્સ્ટ/ડિફોલ્ટ) */}
               {currentRole === 'ADMIN' && (
                 <button onClick={() => setActiveTab('leaders')} className={`py-3 px-4 font-medium text-xs sm:text-sm border-b-2 flex items-center space-x-2 ${activeTab === 'leaders' ? 'border-orange-600 text-orange-600 font-bold' : 'border-transparent text-gray-600 hover:text-orange-500'}`}>
                   <i className="fa-solid fa-user-tie"></i>
@@ -1294,10 +1480,8 @@
             </div>
           </nav>
 
-          {}
           <main className="flex-grow max-w-7xl w-full mx-auto p-3 md:p-6">
 
-            {}
             {activeTab === 'leaders' && currentRole === 'ADMIN' && (
               <div>
                 <div className="flex justify-between items-center mb-4">
@@ -1378,7 +1562,10 @@
                         <div className="flex items-center space-x-3 mb-3">
                           <div className="w-10 h-10 rounded-full bg-orange-100 text-orange-600 flex items-center justify-center font-bold text-lg">{leader.name.charAt(0)}</div>
                           <div>
-                            <h3 className="font-bold text-base text-gray-900">{leader.name}</h3>
+                            <h3 className="font-bold text-base text-gray-900 flex items-center space-x-1">
+                              <span>{leader.name}</span>
+                              {leader.role === 'ADMIN' && <i className="fa-solid fa-crown text-yellow-500 text-xs" title="Super Admin"></i>}
+                            </h3>
                             <p className="text-xs text-gray-500">{leader.area}</p>
                           </div>
                         </div>
@@ -1413,10 +1600,20 @@
                           </button>
                         </div>
 
-                        <button onClick={() => handleResetLeaderPassword(leader)} className="w-full mt-3 bg-gray-100 hover:bg-gray-200 text-gray-700 py-1.5 rounded text-[11px] font-bold flex items-center justify-center space-x-1.5">
-                          <i className="fa-solid fa-key"></i>
-                          <span>પાસવર્ડ ભૂલી ગયા? Reset કરો</span>
-                        </button>
+                        <div className="flex space-x-2 mt-3">
+                            <button onClick={() => handleChangeLeaderRole(leader)} className="w-1/2 bg-blue-50 hover:bg-blue-100 text-blue-700 py-1.5 rounded text-[11px] font-bold flex items-center justify-center space-x-1.5 border border-blue-200">
+                              <i className="fa-solid fa-user-shield"></i>
+                              <span>રોલ બદલો</span>
+                            </button>
+                            <button onClick={() => handleResetLeaderPassword(leader)} className="w-1/2 bg-gray-100 hover:bg-gray-200 text-gray-700 py-1.5 rounded text-[11px] font-bold flex items-center justify-center space-x-1.5 border border-gray-200">
+                              <i className="fa-solid fa-key"></i>
+                              <span>Reset પાસવર્ડ</span>
+                            </button>
+                          </div>
+                          <button onClick={() => handleDeleteLeader(leader)} className="w-full mt-2 bg-red-50 hover:bg-red-100 border border-red-200 text-red-600 py-1.5 rounded text-[11px] font-bold flex items-center justify-center space-x-1.5">
+                            <i className="fa-solid fa-trash-can"></i>
+                            <span>આ લીડરને ડીલીટ કરો</span>
+                          </button>
                       </div>
                     );
                   })}
@@ -1424,7 +1621,6 @@
               </div>
             )}
 
-            {}
             {activeTab === 'members' && currentRole !== 'ATTENDANCE_USER' && (
               <div>
                 {leaderFilter && currentRole === 'ADMIN' && (
@@ -1436,7 +1632,7 @@
                 <div className="bg-white p-3 rounded-lg shadow-sm border border-gray-200 mb-4 flex flex-col md:flex-row gap-3 justify-between items-center no-print">
                   <div className="w-full md:w-1/3 relative">
                     <i className="fa-solid fa-magnifying-glass absolute left-3 top-3 text-gray-400"></i>
-                    <input type="text" placeholder="નામ, મો. નંબર, SMK અથવા ગામ થી શોધો..." value={memberSearch} onChange={(e) => setMemberSearch(e.target.value)} className="w-full pl-9 pr-3 py-2 border rounded-md text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none" />
+                    <input type="text" placeholder="નામ, મો. નંબર, SMK અથવા આધારકાર્ડ થી શોધો..." value={memberSearch} onChange={(e) => setMemberSearch(e.target.value)} className="w-full pl-9 pr-3 py-2 border rounded-md text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none" />
                   </div>
 
                   <div className="flex flex-wrap gap-1.5 w-full md:w-auto text-xs">
@@ -1486,7 +1682,7 @@
                           <div className="flex items-center space-x-3">
                             <div className="w-12 h-12 rounded-full overflow-hidden border-2 border-orange-200 flex-shrink-0 bg-orange-100 flex items-center justify-center shadow-sm">
                               {m.photoUrl ? (
-                                <img src={m.photoUrl} alt={m.fullName} className="w-full h-full object-cover" onError={(e) => { e.target.style.display = 'none'; }} />
+                                <img src={m.photoUrl} alt={m.fullName} className="w-full h-full object-cover" onError={(e) => { e.target.onerror = null; e.target.src = `https://ui-avatars.com/api/?name=${m.fullName || 'User'}&background=fed7aa&color=c2410c`; }} />
                               ) : (
                                 <span className="text-orange-700 font-bold text-lg">{m.fullName ? m.fullName.charAt(0) : 'સ'}</span>
                               )}
@@ -1507,8 +1703,8 @@
                           </div>
 
                           <div className="flex items-center space-x-2">
-                            <i className="fa-solid fa-location-dot text-gray-500 w-4"></i>
-                            <span>મૂળ ગામ: <strong className="text-gray-800">{[m.nativeVillage, m.taluka, m.district].filter(Boolean).join(', ') || 'ઉપલબ્ધ નથી'}</strong></span>
+                            <i className="fa-solid fa-id-card text-gray-500 w-4"></i>
+                            {m.aadharCard && <span>આધારકાર્ડ: <strong className="text-gray-800">{m.aadharCard}</strong></span>}
                           </div>
 
                           <div className="flex items-center space-x-2">
@@ -1559,7 +1755,6 @@
               </div>
             )}
 
-            {}
             {activeTab === 'attendance' && currentRole !== 'ADMIN' && (
               <div className="space-y-6">
                 <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200">
@@ -1635,11 +1830,11 @@
                               <div key={m.id} className="py-2.5 flex justify-between items-center px-2 hover:bg-gray-50">
                                 <div className="flex items-center space-x-3">
                                   <div className="w-9 h-9 rounded-full overflow-hidden border border-orange-200 flex-shrink-0 bg-orange-100 flex items-center justify-center text-xs font-bold text-orange-700">
-                                    {m.photoUrl ? <img src={m.photoUrl} alt={m.fullName} className="w-full h-full object-cover" /> : (m.fullName ? m.fullName.charAt(0) : 'સ')}
+                                    {m.photoUrl ? <img src={m.photoUrl} alt={m.fullName} className="w-full h-full object-cover" onError={(e) => { e.target.onerror = null; e.target.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(m.fullName || 'User')}&background=fed7aa&color=c2410c`; }} /> : (m.fullName ? m.fullName.charAt(0) : 'સ')}
                                   </div>
                                   <div>
                                     <span className="font-bold text-sm text-gray-800 block">{m.fullName}</span>
-                                    <span className="text-xs text-gray-500">{m.mobile} {m.smkNo ? `| ${m.smkNo}` : ''} | {[m.nativeVillage, m.taluka, m.district].filter(Boolean).join(', ') || 'ગામ દર્શાવેલ નથી'}</span>
+                                    <span className="text-xs text-gray-500">{m.mobile} {m.smkNo ? `| ${m.smkNo}` : ''} {m.aadharCard ? `| ${m.aadharCard}` : ''}</span>
                                   </div>
                                 </div>
                                 <button disabled={activeAttendanceSession.isClosed} onClick={() => toggleMemberAttendance(m.id)} className={`px-4 py-1.5 rounded text-xs font-bold transition-all ${isPresent ? 'bg-emerald-600 text-white shadow' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}>
@@ -1656,7 +1851,6 @@
               </div>
             )}
 
-            {}
             {activeTab === 'polls_chats' && currentRole !== 'ATTENDANCE_USER' && (
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200 flex flex-col justify-between">
@@ -1747,7 +1941,6 @@
               </div>
             )}
 
-            {}
             {activeTab === 'tasks' && currentRole !== 'ATTENDANCE_USER' && (
               <div className="space-y-6">
                 <div className="flex justify-between items-center">
@@ -1795,7 +1988,6 @@
               </div>
             )}
 
-            {}
             {activeTab === 'ai_tools' && currentRole !== 'ATTENDANCE_USER' && (
               <div className="space-y-6">
                 <div className="ai-gradient text-white p-5 rounded-2xl shadow-lg space-y-2">
@@ -1848,7 +2040,6 @@
               </div>
             )}
 
-            {}
             {activeTab === 'reports' && currentRole === 'ADMIN' && (
               <div className="bg-white p-5 rounded-lg shadow-sm border border-gray-200 space-y-6">
                 <h2 className="text-lg font-bold text-gray-800">સિસ્ટમ ડેટા એક્સપોર્ટ અને રિપોર્ટ્સ</h2>
@@ -1895,7 +2086,6 @@
                   </div>
                 </div>
 
-                {}
                 <div className="print-only">
                   <h2 className="text-lg font-bold mb-3">સભ્યોનું લિસ્ટ — {new Date().toLocaleDateString('gu-IN')}</h2>
                   <table className="w-full text-xs border-collapse border border-gray-400">
@@ -1917,7 +2107,6 @@
                     </tbody>
                   </table>
                 </div>
-                {}
                 <div className="border-t pt-5">
                   <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-2 mb-1">
                     <h3 className="font-bold text-base text-gray-800">📋 લીડર-વાઈઝ સભ્ય વેરિફિકેશન સ્ટેટસ</h3>
@@ -1989,13 +2178,12 @@
 
           </main>
 
-          {}
           <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 overflow-x-auto no-scrollbar py-2 md:hidden no-print z-40 shadow-lg">
             <div className="flex justify-around items-center min-w-max px-2 space-x-3 text-xs">
               {currentRole !== 'ATTENDANCE_USER' ? (
                 <>
                   {currentRole === 'ADMIN' && (
-                    <button onClick={() => setActiveTab('leaders')} className={`flex flex-col items-center px-2.5 ${activeTab === 'leaders' ? 'text-orange-600 font-bold' : 'text-gray-500'}`}>
+                  <button onClick={() => setActiveTab('leaders')} className={`flex flex-col items-center px-2.5 ${activeTab === 'leaders' ? 'text-orange-600 font-bold' : 'text-gray-500'}`}>
                       <i className="fa-solid fa-user-tie text-base"></i>
                       <span>લીડરો</span>
                     </button>
@@ -2035,9 +2223,6 @@
             </div>
           </div>
 
-          {}
-
-          {/* 🔔 નોટિફિકેશન સેન્ટર મોડલ */}
           {showNotificationCenter && (
             <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
               <div className="bg-white rounded-2xl max-w-lg w-full max-h-[85vh] overflow-hidden shadow-2xl flex flex-col border border-orange-200">
@@ -2101,7 +2286,6 @@
             </div>
           )}
 
-          {}
           {aiMsgModalMember && (
             <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
               <div className="bg-white rounded-2xl max-w-md w-full p-5 shadow-2xl space-y-4 border border-purple-200">
@@ -2114,7 +2298,8 @@
                 </div>
 
                 <div className="space-y-3 text-xs">
-                  <p>સભ્ય: <strong>{aiMsgModalMember.fullName}</strong> ({aiMsgModalMember.nativeVillage})</p>
+
+                  <p>નામ: <strong>{aiMsgModalMember.fullName}</strong> {aiMsgModalMember.aadharCard ? `( ${aiMsgModalMember.aadharCard} )` : ''}</p>
 
                   <div>
                     <label className="font-bold text-gray-700 block mb-1">સંદેશનો ઉદ્દેશ્ય (Tone):</label>
@@ -2145,7 +2330,6 @@
             </div>
           )}
 
-          {}
           {phoneActionModal && (
             <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
               <div className="bg-white rounded-lg p-5 max-w-xs w-full shadow-xl space-y-4 text-center">
@@ -2172,7 +2356,6 @@
             </div>
           )}
 
-          {}
           {selectedMemberModal && (
             <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
               <div className="bg-white rounded-lg max-w-lg w-full max-h-[90vh] overflow-y-auto p-5 shadow-xl space-y-4">
@@ -2180,7 +2363,7 @@
                   <div className="flex items-center space-x-3">
                     <div className="w-14 h-14 rounded-full overflow-hidden border-2 border-orange-300 bg-orange-100 flex items-center justify-center font-bold text-xl text-orange-700 flex-shrink-0">
                       {selectedMemberModal.photoUrl ? (
-                        <img src={selectedMemberModal.photoUrl} alt={selectedMemberModal.fullName} className="w-full h-full object-cover" />
+                        <img src={selectedMemberModal.photoUrl} alt={selectedMemberModal.fullName} className="w-full h-full object-cover" onError={(e) => { e.target.onerror = null; e.target.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(selectedMemberModal.fullName || 'User')}&background=fed7aa&color=c2410c`; }} />
                       ) : (
                         selectedMemberModal.fullName?.charAt(0) || 'સ'
                       )}
@@ -2206,19 +2389,13 @@
                     <p className="font-semibold">{selectedMemberModal.occupation || '-'} {selectedMemberModal.occupationType ? `(${selectedMemberModal.occupationType})` : ''}</p>
                   </div>
 
-                  <div className="grid grid-cols-3 gap-2 bg-gray-50 p-2.5 rounded">
-                    <div><span className="text-gray-500 block">મૂળ ગામ:</span><strong>{selectedMemberModal.nativeVillage || '-'}</strong></div>
-                    <div><span className="text-gray-500 block">તાલુકો:</span><strong>{selectedMemberModal.taluka || '-'}</strong></div>
-                    <div><span className="text-gray-500 block">જિલ્લો:</span><strong>{selectedMemberModal.district || '-'}</strong></div>
-                  </div>
-
                   <div className="bg-gray-50 p-2.5 rounded space-y-1">
                     <span className="text-gray-500 block">હાલનું સરનામું:</span>
                     <p className="font-semibold">{selectedMemberModal.address || '-'}</p>
                   </div>
 
                   <div className="grid grid-cols-2 gap-2 bg-gray-50 p-2.5 rounded">
-                    <div><span className="text-gray-500 block">મકાન:</span><strong>{selectedMemberModal.houseType || '-'}</strong></div>
+                    <div><span className="text-gray-500 block">આધારકાર્ડ:</span><strong>{selectedMemberModal.aadharCard || '-'}</strong></div>
                     <div><span className="text-gray-500 block">Mediclaim:</span><strong>{selectedMemberModal.mediclaim || '-'}</strong></div>
                   </div>
 
@@ -2254,6 +2431,11 @@
                   <div className="bg-blue-50 p-2.5 rounded space-y-1 border border-blue-200">
                     <span className="font-bold text-blue-900 block">સ્થાનિક મુર્તિબાગમાં કઈ કઈ સેવાની જવાબદારી છે:</span>
                     <p>{selectedMemberModal.murtibaugSeva || '-'}</p>
+                  </div>
+
+                  <div className="bg-blue-50 p-2.5 rounded space-y-1 border border-blue-200">
+                    <span className="font-bold text-blue-900 block">વિરસદધામ / અન્ય સેવા:</span>
+                    <p>{selectedMemberModal.virsaddhamSeva || '-'}</p>
                   </div>
 
                   <div className="bg-blue-50 p-2.5 rounded space-y-1 border border-blue-200">
@@ -2303,7 +2485,6 @@
             </div>
           )}
 
-          {}
           {showAddMemberModal && (
             <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
               <div className="bg-white rounded-lg max-w-xl w-full max-h-[90vh] overflow-y-auto p-5 shadow-xl">
@@ -2432,19 +2613,8 @@
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                    <div>
-                      <label className="font-semibold block mb-1">મૂળ ગામ</label>
-                      <input type="text" value={memberFormData.nativeVillage} onChange={(e) => setMemberFormData({...memberFormData, nativeVillage: e.target.value})} className="w-full border p-2 rounded" />
-                    </div>
-                    <div>
-                      <label className="font-semibold block mb-1">તાલુકો</label>
-                      <input type="text" value={memberFormData.taluka} onChange={(e) => setMemberFormData({...memberFormData, taluka: e.target.value})} className="w-full border p-2 rounded" />
-                    </div>
-                    <div>
-                      <label className="font-semibold block mb-1">જિલ્લો</label>
-                      <input type="text" value={memberFormData.district} onChange={(e) => setMemberFormData({...memberFormData, district: e.target.value})} className="w-full border p-2 rounded" />
-                    </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
+
                   </div>
 
                   <div>
@@ -2454,12 +2624,8 @@
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     <div>
-                      <label className="font-semibold block mb-1">મકાન — ઘરનું કે ભાડે?</label>
-                      <select value={memberFormData.houseType} onChange={(e) => setMemberFormData({...memberFormData, houseType: e.target.value})} className="w-full border p-2 rounded">
-                        <option value="">-- પસંદ કરો --</option>
-                        <option value="ઘરનું">ઘરનું</option>
-                        <option value="ભાડે">ભાડે</option>
-                      </select>
+                      <label className="font-semibold block mb-1">આધારકાર્ડ નંબર</label>
+                      <input type="text" maxLength="12" value={memberFormData.aadharCard} onChange={(e) => setMemberFormData({...memberFormData, aadharCard: e.target.value.replace(/\D/g, '')})} className="w-full border p-2 rounded" />
                     </div>
                     <div>
                       <label className="font-semibold block mb-1">Mediclaim છે?</label>
@@ -2583,7 +2749,7 @@
                     <div className="pt-2">
                       <div className="flex justify-between items-center mb-2">
                         <label className="font-bold text-[11px] text-blue-900">દીકરાઓની વિગત (બાલિકા નહીં)</label>
-                        <button type="button" onClick={() => setMemberFormData({...memberFormData, sons: [...(memberFormData.sons || []), { name: '', birthDate: '', satsangDate: '' }]})} className="bg-blue-600 text-white text-[10px] font-bold px-2.5 py-1 rounded-full">+ ઉમેરો</button>
+                        <button type="button" onClick={() => setMemberFormData({...memberFormData, sons: [...(memberFormData.sons || []), { name: '', aadharCard: '', birthDate: '', satsangDate: '' }]})} className="bg-blue-600 text-white text-[10px] font-bold px-2.5 py-1 rounded-full">+ ઉમેરો</button>
                       </div>
                       {(!memberFormData.sons || memberFormData.sons.length === 0) && <p className="text-[11px] text-gray-400">કોઈ ઉમેરેલ નથી.</p>}
                       <div className="space-y-2">
@@ -2591,6 +2757,7 @@
                           <div key={idx} className="bg-blue-50 border border-blue-200 rounded p-2 relative grid grid-cols-1 sm:grid-cols-3 gap-2">
                             <button type="button" onClick={() => setMemberFormData({...memberFormData, sons: memberFormData.sons.filter((_, i) => i !== idx)})} className="absolute -top-2 -right-2 w-5 h-5 rounded-full bg-rose-600 text-white text-[10px] flex items-center justify-center shadow">✕</button>
                             <input type="text" placeholder="નામ" value={son.name} onChange={(e) => { const s = [...memberFormData.sons]; s[idx] = {...s[idx], name: e.target.value}; setMemberFormData({...memberFormData, sons: s}); }} className="w-full border p-1.5 rounded text-xs bg-white" />
+                            <input type="text" placeholder="આધારકાર્ડ નંબર" maxLength="12" value={son.aadharCard || ''} onChange={(e) => { const s = [...memberFormData.sons]; s[idx] = {...s[idx], aadharCard: e.target.value.replace(/\D/g, '')}; setMemberFormData({...memberFormData, sons: s}); }} className="w-full border p-1.5 rounded text-xs bg-white" />
                             <input type="date" value={son.birthDate} onChange={(e) => { const s = [...memberFormData.sons]; s[idx] = {...s[idx], birthDate: e.target.value}; setMemberFormData({...memberFormData, sons: s}); }} className="w-full border p-1.5 rounded text-xs bg-white" />
                             <input type="text" placeholder="સત્સંગ તારીખ/તિથિ" value={son.satsangDate} onChange={(e) => { const s = [...memberFormData.sons]; s[idx] = {...s[idx], satsangDate: e.target.value}; setMemberFormData({...memberFormData, sons: s}); }} className="w-full border p-1.5 rounded text-xs bg-white" />
                           </div>
@@ -2622,21 +2789,18 @@
                       {friend2AutoFound && <span className="text-[10px] font-bold text-emerald-700 block mt-0.5">✓ ઓટોમેટિક મળી ગયેલ નામ</span>}
                     </div>
                   </div>
-
-                  {currentRole === 'ADMIN' && (
-                    <div>
-                      <label className="font-semibold block mb-1">પોષક લીડર પસંદ કરો</label>
-                      <select value={memberFormData.assignedLeaderId || ''} onChange={(e) => setMemberFormData({...memberFormData, assignedLeaderId: e.target.value || null})} className="w-full border p-2 rounded font-bold text-orange-900">
-                        <option value="">-- અનસાઇન (કોઈ લીડર નહીં) --</option>
-                        {leaders.map(l => (
-                          <option key={l.id} value={l.id}>{l.name} ({l.area})</option>
-                        ))}
-                      </select>
-                    </div>
-                  )}
+                  <div>
+                    <label className="font-semibold block mb-1">હાલના પોષક લીડર</label>
+                    <select value={memberFormData.assignedLeaderId || ''} onChange={(e) => setMemberFormData({...memberFormData, assignedLeaderId: e.target.value || null})} className="w-full border p-2 rounded font-bold text-orange-900">
+                      <option value="">-- પસંદ કરો (ખબર ના હોય તો ખાલી રાખો) --</option>
+                      {leaders.map(l => (
+                        <option key={l.id} value={l.id}>{l.name} ({l.area})</option>
+                      ))}
+                    </select>
+                  </div>
 
                   {currentRole === 'ADMIN' && memberFormData.id && (
-                    <div className="pt-2 border-t">
+                      <div className="pt-2 border-t">
                       <button type="button" onClick={() => { setShowAddMemberModal(false); openAddLeaderModal(memberFormData); }} className="w-full bg-amber-100 text-amber-800 hover:bg-amber-200 px-3 py-2 rounded text-xs font-bold flex items-center justify-center space-x-1">
                         <span>👑</span>
                         <span>આ સભ્યને પોષક લીડર બનાવો</span>
@@ -2770,6 +2934,14 @@
                   <div>
                     <label className="font-semibold block mb-1">વિસ્તાર / ઝોન</label>
                     <input type="text" value={leaderFormData.area} onChange={(e) => setLeaderFormData({ ...leaderFormData, area: e.target.value })} className="w-full border p-2 rounded" placeholder="દા.ત. વેસ્ટ ઝોન - સુરત" />
+                  </div>
+                  <div>
+                    <label className="font-semibold block mb-1">આ લીડરનો રોલ પસંદ કરો *</label>
+                    <select required value={leaderFormData.role || 'LEADER'} onChange={(e) => setLeaderFormData({ ...leaderFormData, role: e.target.value })} className="w-full border p-2 rounded font-bold text-orange-900 bg-orange-50">
+                      <option value="LEADER">પોષક લીડર (Poshak Leader)</option>
+                      <option value="ADMIN">સુપર એડમિન (Super Admin)</option>
+                    </select>
+                    <p className="text-[10px] text-gray-500 mt-1">સુપર એડમિન પાસે બધી સિસ્ટમ જોવાનો અને નવા લીડર ઉમેરવાનો અધિકાર રહેશે.</p>
                   </div>
                   <p className="text-[11px] text-gray-500">લીડર પોતાનો પાસવર્ડ પહેલી વાર login કરે ત્યારે જાતે સેટ કરશે.</p>
                   <div className="pt-2 border-t flex justify-end space-x-2">
